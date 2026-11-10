@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenRouter Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236d8cff'/%3E%3Cstop offset='1' stop-color='%23b06dff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M9 16h5l3-5 3 10 2-5h1' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300..500,0..1,0&display=block">
+<link rel="stylesheet" id="hljsTheme" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<link rel="stylesheet" href="/style.css">
+<script>
+  // Apply the saved theme before first paint (no flash).
+  try {
+    const t = localStorage.getItem("theme") ||
+      (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    document.documentElement.dataset.theme = t;
+  } catch { document.documentElement.dataset.theme = "dark"; }
+</script>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ Left sidebar: chats ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo"><span class="ms">graphic_eq</span></div>
+      <div class="brand-text">
+        <div class="brand-name">OpenRouter Studio</div>
+        <div class="brand-sub">Any model, one key</div>
+      </div>
+    </div>
+
+    <button class="btn-new" id="newChatBtn"><span class="ms">add</span>New chat</button>
+
+    <div class="chat-search">
+      <span class="ms">search</span>
+      <input id="chatSearch" placeholder="Search chats" autocomplete="off">
+    </div>
+
+    <nav class="chat-list" id="chatList"></nav>
+
+    <div class="side-foot">
+      <button class="credits" id="creditsBtn" title="Usage & limits">
+        <span class="ms">account_balance_wallet</span>
+        <span class="credits-text">
+          <span id="creditsText">Credits…</span>
+          <span class="credits-sub" id="creditsSub"></span>
+          <span class="mini-meter" id="creditsMeter" hidden><i></i></span>
+        </span>
+        <span class="ms credits-chev">chevron_right</span>
+      </button>
+      <div class="side-foot-row">
+        <button class="ghost-btn" id="keyBtn"><span class="ms">key</span>API key</button>
+        <button class="icon-btn" id="themeBtn" title="Toggle theme"><span class="ms" id="themeIcon">light_mode</span></button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ Center: workspace ============ -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn mobile-only" id="menuBtn" title="Chats"><span class="ms">menu</span></button>
+      <span class="kind-badge" id="kindBadge"></span>
+      <input class="title-input" id="chatTitle" value="New chat" spellcheck="false" aria-label="Chat title">
+      <div class="mode-switch" id="modeSwitch" hidden></div>
+      <div class="top-actions">
+        <button class="ghost-btn" id="codeBtn" title="Get code for this chat"><span class="ms">code</span><span class="hide-sm">Get code</span></button>
+        <button class="ghost-btn" id="exportBtn" title="Download chat as Markdown"><span class="ms">download</span><span class="hide-sm">Export</span></button>
+        <button class="icon-btn" id="settingsBtn" title="Run settings"><span class="ms">tune</span></button>
+      </div>
+    </header>
+
+    <section class="scroll" id="scroll">
+      <div class="thread">
+        <!-- chat: system instructions -->
+        <details class="system-box" id="systemBox">
+          <summary>
+            <span class="ms">description</span>
+            <span>System instructions</span>
+            <span class="system-preview" id="systemPreview"></span>
+            <span class="ms chevron">expand_more</span>
+          </summary>
+          <textarea id="systemInput" rows="3" dir="auto"
+            placeholder="Optional tone and style instructions for the model, e.g. “You are a helpful Persian tutor. Answer briefly.”"></textarea>
+        </details>
+
+        <!-- structured input: named fields; the composer becomes a form -->
+        <details class="system-box questions-box" id="inputsBox" hidden>
+          <summary>
+            <span class="ms">input</span>
+            <span>Input fields</span>
+            <span class="system-preview" id="inputsPreview"></span>
+            <span class="ms chevron">expand_more</span>
+          </summary>
+          <div class="questions-body">
+            <p class="q-help" id="inputsHelp"></p>
+            <div id="inputList"></div>
+            <div class="q-actions">
+              <button class="ghost-btn" id="addInputBtn"><span class="ms">add</span>Add input field</button>
+            </div>
+          </div>
+        </details>
+
+        <!-- decisions: the questions the model answers about each item -->
+        <details class="system-box questions-box" id="questionsBox" open hidden>
+          <summary>
+            <span class="ms">rule</span>
+            <span>Questions</span>
+            <span class="system-preview" id="questionsPreview"></span>
+            <span class="ms chevron">expand_more</span>
+          </summary>
+          <div class="questions-body">
+            <p class="q-help">Decision models don't write text. They read your item and answer each question
+              with a <b>probability</b>. Each run below uses these questions.</p>
+            <div id="questionList"></div>
+            <div class="q-actions">
+              <button class="ghost-btn" id="addQuestionBtn"><span class="ms">add</span>Add question</button>
+              <select class="select" id="templateSelect" title="Load a ready-made question set">
+                <option value="">Load a template…</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <!-- structured output: typed fields (chat JSON schema, or fields to extract) -->
+        <details class="system-box questions-box" id="outputsBox" open hidden>
+          <summary>
+            <span class="ms">data_object</span>
+            <span id="outputsTitle">Output structure</span>
+            <span class="system-preview" id="outputsPreview"></span>
+            <span class="ms chevron">expand_more</span>
+          </summary>
+          <div class="questions-body">
+            <p class="q-help" id="outputsHelp"></p>
+            <div id="outputList"></div>
+            <div class="q-actions">
+              <button class="ghost-btn" id="addOutputBtn"><span class="ms">add</span>Add field</button>
+              <select class="select" id="outputTemplate" title="Load a ready-made structure"></select>
+            </div>
+            <details class="schema-details" id="schemaDetails">
+              <summary><span class="ms">code</span>JSON Schema sent to the model<button class="ghost-btn small" id="copySchemaBtn"><span class="ms">content_copy</span>Copy</button></summary>
+              <pre id="schemaPreview"></pre>
+            </details>
+          </div>
+        </details>
+
+        <div class="empty" id="empty">
+          <div class="empty-logo"><span class="ms" id="emptyIcon">graphic_eq</span></div>
+          <h1 id="emptyTitle">What can I help you build?</h1>
+          <p id="emptyText">Chat with GPT, Gemini, Claude, DeepSeek, Grok and hundreds more through one OpenRouter key.</p>
+          <button class="empty-model" id="emptyModelBtn">
+            <span class="ms">smart_toy</span><span id="emptyModelName">Choose a model</span><span class="ms">expand_more</span>
+          </button>
+          <div class="io-strip big" id="emptyIO"></div>
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+
+        <div id="messages"></div>
+      </div>
+    </section>
+
+    <footer class="composer-wrap">
+      <div class="composer" id="composer">
+        <div class="pending" id="pending"></div>
+        <div class="recording" id="recording" hidden>
+          <span class="rec-dot"></span><span id="recTime">0:00</span><span class="rec-label">Recording… click the mic again to stop</span>
+        </div>
+        <div class="field-form" id="fieldForm" hidden></div>
+        <textarea id="input" rows="1" dir="auto" placeholder="Type something…"></textarea>
+        <div class="composer-bar">
+          <button class="icon-btn" id="attachBtn" title="Attach files"><span class="ms">attach_file</span></button>
+          <button class="icon-btn" id="micBtn" title="Record audio" hidden><span class="ms">mic</span></button>
+          <button class="model-chip" id="chipModelBtn" title="Change model (Ctrl+K)">
+            <span class="ms" id="chipModelIcon">smart_toy</span><span id="chipModelName">model</span>
+          </button>
+          <button class="model-chip struct-chip" id="structChip" title="Structured output: answer with typed JSON">
+            <span class="ms">data_object</span><span>JSON</span>
+          </button>
+          <span class="io-strip" id="composerIO"></span>
+          <span class="composer-hint" id="tokenHint"></span>
+          <button class="run-btn" id="runBtn">
+            <span class="ms" id="runIcon">arrow_upward</span><span id="runLabel">Run</span>
+          </button>
+        </div>
+        <input type="file" id="fileInput" multiple hidden>
+        <div class="drop-hint">Drop files to attach</div>
+      </div>
+    </footer>
+  </main>
+
+  <!-- ============ Right: run settings ============ -->
+  <aside class="settings" id="settings">
+    <div class="settings-head">
+      <h2>Run settings</h2>
+      <button class="icon-btn" id="closeSettingsBtn" title="Close"><span class="ms">close</span></button>
+    </div>
+
+    <div class="settings-body">
+      <div class="field">
+        <label>Model</label>
+        <button class="model-select" id="modelBtn">
+          <div class="model-select-text">
+            <div class="model-select-name" id="modelName">Loading…</div>
+            <div class="model-select-id" id="modelId"></div>
+          </div>
+          <span class="ms">unfold_more</span>
+        </button>
+        <div class="io-card" id="modelIO"></div>
+        <div class="model-tags" id="modelTags"></div>
+      </div>
+
+      <!-- live pricing -->
+      <div class="field price-card" id="priceCard">
+        <div class="price-head">
+          <span class="live-dot"></span><b>Live price</b>
+          <span class="muted price-updated" id="priceUpdated"></span>
+          <button class="icon-btn small" id="refreshPricesBtn" title="Refresh prices from OpenRouter"><span class="ms">refresh</span></button>
+        </div>
+        <div class="price-rows" id="priceRows"></div>
+        <div class="estimate" id="estimateBox"></div>
+        <details class="providers" id="providersBox">
+          <summary><span>Providers</span><span class="muted" id="providersCount"></span><span class="ms chevron">expand_more</span></summary>
+          <div id="providerRows" class="provider-rows"></div>
+        </details>
+      </div>
+
+      <div class="field stats">
+        <div class="stat-row"><span id="tokenLabel">Token count</span><span id="tokenCount">0</span></div>
+        <div class="meter"><div id="tokenMeter"></div></div>
+        <div class="stat-row"><span>Cost of this chat</span><span id="chatCost">$0</span></div>
+      </div>
+
+      <!-- settings that only apply to chat models -->
+      <div id="chatSettings">
+        <div class="field structured-field">
+          <label class="toggle"><input type="checkbox" id="structuredToggle"><span class="switch"></span><span><b>Structured output</b></span></label>
+          <div class="field-note" id="structuredNote"></div>
+          <label class="toggle sub-toggle" id="manyRow"><input type="checkbox" id="manyToggle"><span class="switch"></span><span>Return a list of items</span></label>
+        </div>
+        <div class="field" id="audioOutField" hidden>
+          <label>Spoken reply</label>
+          <div class="two-col">
+            <select class="select full" id="audioVoice" title="Voice"></select>
+            <select class="select full" id="audioFormat" title="Audio format">
+              <option value="pcm16">pcm16 → wav</option><option value="wav">wav</option><option value="mp3">mp3</option>
+            </select>
+          </div>
+          <div class="field-note">This model can answer with audio. Its spoken reply plays under the text.</div>
+        </div>
+
+        <div class="field">
+          <div class="label-row"><label for="temperature">Temperature</label>
+            <input class="num" type="number" id="temperatureNum" min="0" max="2" step="0.05"></div>
+          <input type="range" id="temperature" min="0" max="2" step="0.05">
+          <div class="range-hint"><span>Precise</span><span>Creative</span></div>
+        </div>
+
+        <div class="field" id="thinkingField">
+          <label>Thinking</label>
+          <div class="segmented" id="reasoning"></div>
+          <div class="field-note" id="thinkingNote"></div>
+        </div>
+
+        <details class="advanced" id="advanced">
+          <summary><span>Advanced settings</span><span class="ms chevron">expand_more</span></summary>
+
+          <div class="field">
+            <div class="label-row"><label for="maxTokens">Max output tokens</label></div>
+            <input class="text-input" type="number" id="maxTokens" min="1" placeholder="Model default">
+          </div>
+
+          <div class="field">
+            <div class="label-row"><label for="topP">Top P</label>
+              <input class="num" type="number" id="topPNum" min="0" max="1" step="0.01"></div>
+            <input type="range" id="topP" min="0" max="1" step="0.01">
+          </div>
+
+          <div class="field">
+            <label for="stopInput">Stop sequences</label>
+            <div class="chips-input" id="stopChips">
+              <input id="stopInput" placeholder="Add stop… (Enter)">
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="seed">Seed</label>
+            <input class="text-input" type="number" id="seed" placeholder="Random">
+          </div>
+        </details>
+      </div>
+
+      <!-- settings for image / video / speech / transcription / embeddings (built from the model's own options) -->
+      <div id="kindSettings"></div>
+
+      <button class="ghost-btn reset-btn" id="resetBtn"><span class="ms">restart_alt</span>Reset settings</button>
+    </div>
+  </aside>
+
+  <div class="scrim" id="scrim"></div>
+</div>
+
+<!-- ============ Model picker ============ -->
+<div class="modal" id="modelModal" hidden>
+  <div class="modal-card model-card" role="dialog" aria-label="Choose a model">
+    <div class="modal-head">
+      <h3>Choose a model</h3>
+      <button class="icon-btn" data-close><span class="ms">close</span></button>
+    </div>
+    <div class="tabs kind-tabs" id="kindTabs"></div>
+    <div class="model-search">
+      <span class="ms">search</span>
+      <input id="modelSearch" placeholder="Search models: name, provider or id (e.g. gemini, jev, whisper, free)" autocomplete="off">
+    </div>
+    <div class="model-filters">
+      <div class="filter-chips" id="modelFilters">
+        <button data-f="free">Free</button>
+        <button data-f="image">Image in</button>
+        <button data-f="file">PDF in</button>
+        <button data-f="audio">Audio in</button>
+        <button data-f="video">Video in</button>
+        <button data-f="reasoning">Thinking</button>
+      </div>
+      <select id="modelSort" class="select">
+        <option value="newest">Newest</option>
+        <option value="name">Name</option>
+        <option value="cheap">Cheapest</option>
+        <option value="context">Largest context</option>
+      </select>
+    </div>
+    <div class="model-list" id="modelList"></div>
+  </div>
+</div>
+
+<!-- ============ API key ============ -->
+<div class="modal" id="keyModal" hidden>
+  <div class="modal-card small" role="dialog" aria-label="API key">
+    <div class="modal-head">
+      <h3>OpenRouter API key</h3>
+      <button class="icon-btn" data-close><span class="ms">close</span></button>
+    </div>
+    <p class="muted">Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>.
+      It is saved only on this computer, in the project's <code>.env</code> file.</p>
+    <div class="key-info" id="keyInfo"></div>
+    <input class="text-input" type="password" id="keyInput" placeholder="sk-or-v1-…" autocomplete="off">
+    <div class="form-error" id="keyError"></div>
+    <div class="modal-actions">
+      <button class="ghost-btn" data-close>Cancel</button>
+      <button class="primary-btn" id="saveKeyBtn">Save key</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Usage & limits ============ -->
+<div class="modal" id="usageModal" hidden>
+  <div class="modal-card usage-card" role="dialog" aria-label="Usage and limits">
+    <div class="modal-head">
+      <h3>Usage &amp; limits</h3>
+      <div class="head-actions">
+        <button class="icon-btn" id="usageRefreshBtn" title="Refresh from OpenRouter"><span class="ms">refresh</span></button>
+        <button class="icon-btn" data-close><span class="ms">close</span></button>
+      </div>
+    </div>
+    <div class="usage-body" id="usageBody"></div>
+    <div class="modal-actions spread">
+      <a class="ghost-btn" href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener"><span class="ms">open_in_new</span>Set limits on OpenRouter</a>
+      <button class="ghost-btn" id="changeKeyBtn"><span class="ms">key</span>Change key</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ Get code ============ -->
+<div class="modal" id="codeModal" hidden>
+  <div class="modal-card code-card" role="dialog" aria-label="Get code">
+    <div class="modal-head">
+      <h3>Get code</h3>
+      <button class="icon-btn" data-close><span class="ms">close</span></button>
+    </div>
+    <div class="tabs" id="codeTabs">
+      <button data-lang="wrapper" class="on">Python (this project)</button>
+      <button data-lang="requests">Python (requests)</button>
+      <button data-lang="curl">cURL</button>
+      <button data-lang="json">JSON</button>
+    </div>
+    <div class="code-wrap">
+      <button class="ghost-btn copy-code" id="copyCodeBtn"><span class="ms">content_copy</span>Copy</button>
+      <pre><code id="codeOut"></code></pre>
+    </div>
+    <p class="muted small-note" id="codeNote"></p>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="/app.js"></script>
+<script src="/pricing.js"></script>
+<script src="/modes.js"></script>
+<script src="/structured.js"></script>
+</body>
+</html>

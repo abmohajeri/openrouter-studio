@@ -1,0 +1,37 @@
+# ── Secrets ───────────────────────────────────────────────────────────
+# Your OpenRouter API key lives here. Never commit it.
+.env
+.env.*
+!.env.example
+
+# ── Your data (created by the web studio) ─────────────────────────────
+chats/
+media/
+
+# ── Python ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Virtual environments ──────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Editors and IDEs ──────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*~
+
+# ── Operating systems ─────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
