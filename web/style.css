@@ -915,8 +915,6 @@ input[type="range"] { width: 100%; accent-color: var(--accent-strong); margin: 4
   .gallery { grid-template-columns: 1fr; }
   .q-opt input[data-o="name"] { flex-basis: 40%; }
 }
-.kind-tabs .ms { display: none; }
-
 /* ===================================================================
    Usage & limits
    =================================================================== */

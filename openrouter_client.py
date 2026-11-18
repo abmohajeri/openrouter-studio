@@ -22,6 +22,12 @@ Usage:
 
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 9):
+    print("OpenRouter Studio requires Python 3.9 or newer.", file=sys.stderr)
+    sys.exit(1)
+
 import base64
 import json
 import os

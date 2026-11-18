@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openrouter-studio"
+version = "2.0.0"
+description = "A local, AI-Studio-style web UI, CLI, and Python library for OpenRouter models."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Abolfazl" }]
+keywords = ["openrouter", "llm", "ai", "chat", "cli", "web"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+]
+dependencies = ["requests>=2.31"]
+
+[project.scripts]
+openrouter-studio = "app:main"
+openrouter = "main:main"
+
+[tool.setuptools]
+py-modules = ["openrouter_client", "app", "main", "example"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"*" = ["web/*", "web/*.html", "web/*.css", "web/*.js", "docs/screenshots/*", ".env.example"]

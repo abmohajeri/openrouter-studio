@@ -8,6 +8,10 @@ import getpass
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 9):
+    print("OpenRouter Studio requires Python 3.9 or newer.", file=sys.stderr)
+    sys.exit(1)
+
 from openrouter_client import (
     DEFAULT_MODEL,
     ENV_FILE,

@@ -51,11 +51,25 @@ A local, AI-Studio-style web app, a command-line tool and a small Python library
 ## Quick start
 
 ```bash
-cd openrouter                     # the project folder
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+cd openrouter-studio              # the project folder
 
+python3 -m venv .venv && source .venv/bin/activate
+python -m pip install -r requirements.txt   # use 'python -m pip', not bare 'pip'
 python app.py          # opens http://localhost:8000
+```
+
+> **Tip:** Inside the venv, always use `python -m pip` instead of bare `pip`.
+> On some macOS setups, `pip` is aliased to the system Python, which would install
+> packages outside your virtual environment.
+
+Or install it as a proper package (gives you the `openrouter-studio` and `openrouter` commands):
+
+```bash
+cd openrouter-studio
+source .venv/bin/activate
+python -m pip install -e .
+openrouter-studio      # opens http://localhost:8000
+openrouter "Hello"     # CLI tool
 ```
 
 On first start the page asks for your API key ([get one here](https://openrouter.ai/keys)) and

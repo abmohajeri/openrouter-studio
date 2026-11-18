@@ -944,6 +944,7 @@ function handleEvent(msg, ev) {
     msg.meta.usage = ev.usage || null;
     msg.meta.servedBy = ev.model;
     msg.meta.seconds = ev.seconds;
+    if (ev.stopped) msg.meta.stopped = true;
   } else if (ev.type === "error") msg.meta.error = ev.message;
 }
 
@@ -1086,10 +1087,14 @@ function mediaDuration(url, tag) {
   return new Promise((resolve) => {
     const el = document.createElement(tag);
     el.preload = "metadata";
-    el.onloadedmetadata = () => resolve(Number.isFinite(el.duration) ? el.duration : null);
-    el.onerror = () => resolve(null);
+    el.style.display = "none";
+    const cleanup = () => { try { el.remove(); } catch { /* already removed */ } };
+    const done = (dur) => { resolve(dur); cleanup(); };
+    el.onloadedmetadata = () => done(Number.isFinite(el.duration) ? el.duration : null);
+    el.onerror = () => done(null);
     el.src = url;
-    setTimeout(() => resolve(null), 4000);
+    document.body.appendChild(el);
+    setTimeout(() => done(null), 4000);
   });
 }
 

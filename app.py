@@ -14,6 +14,12 @@ Chats are saved as JSON in ./chats/, generated images/audio/video in ./media/.
 
 from __future__ import annotations
 
+import sys
+
+if sys.version_info < (3, 9):
+    print("OpenRouter Studio requires Python 3.9 or newer.", file=sys.stderr)
+    sys.exit(1)
+
 import argparse
 import base64
 import json
@@ -82,7 +88,13 @@ def _num(value) -> float | None:
 
 def slim_pricing(p: dict) -> dict:
     """OpenRouter prices are strings in USD per unit; turn them into numbers (-1 = varies)."""
-    out = {k: _num(v) for k, v in p.items() if k not in ("overrides", "discount") and _num(v) is not None}
+    out = {}
+    for k, v in p.items():
+        if k in ("overrides", "discount"):
+            continue
+        n = _num(v)
+        if n is not None:
+            out[k] = n
     if _num(p.get("discount")):
         out["discount"] = _num(p["discount"])
     if isinstance(p.get("overrides"), list):
@@ -154,7 +166,9 @@ _catalog_lock = threading.Lock()
 def get_catalog(force: bool = False) -> dict:
     with _catalog_lock:
         age = time.time() - _catalog["time"]
-        if _catalog["data"] is None or age > CATALOG_TTL or (force and age > 15):
+        # A manual refresh (force=True) always re-fetches; the 15 s debounce
+        # only applies to automatic background refreshes.
+        if _catalog["data"] is None or age > CATALOG_TTL or force:
             _catalog.update(data=build_catalog(), time=time.time())
         return _catalog["data"]
 
@@ -582,8 +596,10 @@ class Handler(BaseHTTPRequestHandler):
         params = body.get("params") or {}
         start = time.time()
         audio_chunks: list[bytes] = []
-        events = client.chat_stream_events(body.get("messages") or [], model=body.get("model"), **params)
+        stopped = False
+        events = None
         try:
+            events = client.chat_stream_events(body.get("messages") or [], model=body.get("model"), **params)
             for kind, text in events:
                 if kind == "audio":
                     audio_chunks.append(base64.b64decode(text))
@@ -600,9 +616,10 @@ class Handler(BaseHTTPRequestHandler):
                 "model": client.last_model,
                 "usage": client.last_usage,
                 "seconds": round(time.time() - start, 2),
+                "stopped": stopped,
             })
         except (BrokenPipeError, ConnectionResetError):
-            pass  # the user pressed Stop; closing `events` cancels the request upstream
+            stopped = True  # the user pressed Stop (or the browser closed the tab)
         except Exception as e:  # report anything else to the UI instead of a silent hang
             message = str(e) if isinstance(e, OpenRouterError) else f"{type(e).__name__}: {e}"
             try:
@@ -610,7 +627,8 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         finally:
-            events.close()
+            if events is not None:
+                events.close()  # closes the generator, which closes the upstream HTTP response
 
     # -- PUT / DELETE (saved chats) --
 
@@ -651,6 +669,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
     args = parser.parse_args()
+
+    CHATS_DIR.mkdir(exist_ok=True)
+    MEDIA_DIR.mkdir(exist_ok=True)
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

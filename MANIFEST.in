@@ -1,0 +1,7 @@
+include README.md
+include .env.example
+include requirements.txt
+include pyproject.toml
+include MANIFEST.in
+graft web
+graft docs
