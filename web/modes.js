@@ -291,7 +291,9 @@ function bindQuestionEvents() {
     updateStats();
   });
   $("#addQuestionBtn").addEventListener("click", () => {
-    const n = (state.chat.questions || []).length + 1;
+    const taken = new Set((state.chat.questions || []).map((q) => q.key));
+    let n = taken.size + 1;
+    while (taken.has(`question_${n}`)) n++;
     state.chat.questions.push({ id: uid(), key: `question_${n}`, type: "noul", instructions: "", options: [], levels: [] });
     renderQuestions();
     $(`.q-card:last-child .q-instr`)?.focus();
@@ -428,7 +430,7 @@ function bindKindSettingsEvents() {
    --------------------------------------------------------------------- */
 
 function buildDecisionState(user) {
-  const media = (user.attachments || []).filter((a) => ["image", "audio", "video"].includes(a.kind));
+  const media = (user.attachments || []).filter((a) => ["image", "audio", "video", "pdf"].includes(a.kind));
   if (!media.length) return user.fields || user.content; // input fields go in as a JSON object
   const text = user.fields ? fieldsAsLines(user.fields) : user.content;
   const parts = text ? [text] : [];
@@ -441,6 +443,7 @@ function imageParams(chat, m) {
   for (const [key, d] of Object.entries(m.image?.params || {})) {
     const v = chat.opts[key];
     if (key === "input_references" || v === undefined || v === "") continue;
+    if (d.type === "enum" && d.values?.length && !d.values.includes(v)) continue; // left over from another model
     if (key === "n" && Number(v) <= 1) continue;
     out[key] = d.type === "boolean" && key !== "seed" ? !!v : v;
   }
@@ -451,10 +454,14 @@ function videoRequest(user, chat, m) {
   const v = m.video || {};
   const o = chat.opts;
   const params = {};
-  const dur = optOf(chat, "duration", v.durations?.includes(5) ? 5 : v.durations?.[0]);
+  // settings can be left over from another model: only send values this model offers
+  const offers = (list, val) => !list?.length || list.map(String).includes(String(val));
+  const defDur = v.durations?.includes(5) ? 5 : v.durations?.[0];
+  let dur = optOf(chat, "duration", defDur);
+  if (!offers(v.durations, dur)) dur = defDur;
   if (dur) params.duration = Number(dur);
-  if (o.resolution) params.resolution = o.resolution;
-  if (o.aspect_ratio) params.aspect_ratio = o.aspect_ratio;
+  if (o.resolution && offers(v.resolutions, o.resolution)) params.resolution = o.resolution;
+  if (o.aspect_ratio && offers(v.aspect_ratios, o.aspect_ratio)) params.aspect_ratio = o.aspect_ratio;
   if (v.generate_audio) params.generate_audio = optOf(chat, "generate_audio", true);
   if (o.seed !== undefined && o.seed !== "") params.seed = Number(o.seed);
   const images = (user.attachments || []).filter((a) => a.kind === "image").map((a) => a.data);
@@ -471,8 +478,11 @@ function videoRequest(user, chat, m) {
 
 function speechRequest(user, chat, m) {
   const d = speechDefaults(m);
-  const body = { model: chat.model, input: user.content, voice: optOf(chat, "voice", d.voice) || undefined,
-    response_format: optOf(chat, "response_format", d.format) };
+  let voice = optOf(chat, "voice", d.voice);
+  if (m.voices?.length && !m.voices.includes(voice)) voice = d.voice; // voice of a previous model
+  let format = optOf(chat, "response_format", d.format);
+  if (d.format === "pcm") format = "pcm"; // these models only return raw PCM
+  const body = { model: chat.model, input: user.content, voice: voice || undefined, response_format: format };
   const speed = Number(optOf(chat, "speed", 1));
   if (speed && speed !== 1) body.speed = speed;
   if ((chat.opts.instructions || "").trim()) body.instructions = chat.opts.instructions.trim();
@@ -595,30 +605,44 @@ async function fetchExactCost(msg, chat) {
       if (g.total_cost != null) {
         msg.meta.cost = g.total_cost;
         if (state.chat === chat) { repaintMessage(msg); updateStats(); }
-        saveChat(chat);
+        if (!isStaleChat(chat)) saveChat(chat);
         return;
       }
     } catch { /* not ready yet */ }
   }
 }
 
-const polling = new Set();
+/** True when this chat object was deleted, or the same chat has been re-opened as a newer object. */
+function isStaleChat(chat) {
+  return !!chat.deleted || (state.chat?.id === chat.id && state.chat !== chat)
+    || (chat.messages.length > 0 && !state.chats.some((c) => c.id === chat.id));
+}
+
+const polling = new Map(); // message id -> the newest {msg, chat} objects for that video job
+const VIDEO_RUNNING = ["pending", "in_progress", "queued", "processing"];
 
 /** Video jobs run on OpenRouter; check their status until they finish (also after a reload). */
-async function pollVideo(msg, chat) {
-  if (polling.has(msg.id)) return;
-  polling.add(msg.id);
+async function pollVideo(firstMsg, firstChat) {
+  const id = firstMsg.id;
+  const running = polling.has(id);
+  polling.set(id, { msg: firstMsg, chat: firstChat }); // re-opening a chat hands the loop its new objects
+  if (running) return;
+  let msg = firstMsg, chat = firstChat;
   let failures = 0;
   try {
-    while (["pending", "in_progress", "queued", "processing"].includes(msg.video.status)) {
+    for (;;) {
+      ({ msg, chat } = polling.get(id));
+      if (!VIDEO_RUNNING.includes(msg.video.status)) break;
       await sleep(6000);
-      if (!chat.messages.includes(msg)) return; // deleted meanwhile
+      ({ msg, chat } = polling.get(id));
+      if (!chat.messages.includes(msg) || chat.deleted || !state.chats.some((c) => c.id === chat.id)) return; // deleted meanwhile
       let s;
       try { s = await api(`/api/videos/${encodeURIComponent(msg.video.id)}`); failures = 0; }
       catch (e) {
         if (++failures >= 5) { msg.meta.error = "Lost contact with the video job: " + e.message; msg.video.status = "failed"; }
         continue;
       }
+      if (!s.status) s.status = "failed";
       const changed = s.status !== msg.video.status;
       msg.video.status = s.status;
       if (s.status === "completed") {
@@ -631,16 +655,16 @@ async function pollVideo(msg, chat) {
       if (changed && state.chat === chat) repaintMessage(msg);
     }
   } finally {
-    polling.delete(msg.id);
+    polling.delete(id);
     if (state.chat === chat) { repaintMessage(msg); updateStats(); }
-    saveChat(chat);
+    if (!isStaleChat(chat)) saveChat(chat);
     if (msg.video.status === "completed") { toast("Your video is ready 🎬"); refreshCreditsSoon(); }
   }
 }
 
 function resumeJobs(chat) {
   for (const m of chat.messages) {
-    if (m.video && ["pending", "in_progress", "queued", "processing"].includes(m.video.status)) pollVideo(m, chat);
+    if (m.video && VIDEO_RUNNING.includes(m.video.status)) pollVideo(m, chat);
   }
 }
 
@@ -703,7 +727,7 @@ function renderDecision(m) {
     }
     return `<div class="ans">${head}${body}</div>`;
   }).join("");
-  const cites = (m.citations || []).map((c) => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title || c.url)}</a>`).join(" · ");
+  const cites = (m.citations || []).filter((c) => /^https?:\/\//i.test(c?.url || "")).map((c) => `<a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title || c.url)}</a>`).join(" · ");
   const typed = decisionTyped(m);
   const head = `<div class="struct-head"><span class="tag"><span class="ms">data_object</span>Typed result</span>
     <code class="typed-inline" title="Yes/no answers become booleans, choices strings, scores numbers">${esc(JSON.stringify(typed))}</code>${resultToolbar()}</div>`;
@@ -765,7 +789,7 @@ function renderOutput(m) {
       }
       if (["failed", "cancelled", "expired"].includes(v.status)) return "";
       return `<div class="job"><div class="job-anim"><span class="ms">movie</span></div><div>
-        <b>Generating video…</b><div class="muted small">Status: ${esc(v.status.replace("_", " "))} · <span class="job-elapsed" data-start="${v.started}">0:00</span> elapsed · usually 30 s to a few minutes</div>
+        <b>Generating video…</b><div class="muted small">Status: ${esc(String(v.status || "unknown").replace("_", " "))} · <span class="job-elapsed" data-start="${v.started}">0:00</span> elapsed · usually 30 s to a few minutes</div>
         <div class="muted small">You can keep working. This updates by itself, even after a reload.</div></div></div>`;
     }
     default: return "";

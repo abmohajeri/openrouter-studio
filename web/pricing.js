@@ -312,7 +312,7 @@ function renderEstimate() {
 
 const providersKey = () => `${state.chat?.model}|${kindOf(state.chat) === "image" ? "image" : "model"}`;
 
-async function loadProviders() {
+async function loadProviders(force = false) {
   if (!state.chat) return;
   const key = providersKey();
   if (state.providers.key === key && (state.providers.rows || state.providers.loading)) return;
@@ -320,7 +320,7 @@ async function loadProviders() {
   renderProviders();
   const image = kindOf(state.chat) === "image";
   try {
-    const rows = await api(`/api/providers?model=${encodeURIComponent(state.chat.model)}&image=${image ? 1 : 0}`);
+    const rows = await api(`/api/providers?model=${encodeURIComponent(state.chat.model)}&image=${image ? 1 : 0}${force ? "&refresh=1" : ""}`);
     if (state.providers.key === key) state.providers = { key, rows, loading: false };
   } catch (e) {
     if (state.providers.key === key) state.providers = { key, rows: [], loading: false, error: e.message };
@@ -380,9 +380,11 @@ async function loadCatalog(force = false) {
     }
     if (!$("#modelModal").hidden) { renderKindTabs(); renderModelList(); }
     updateStats();
-    loadProviders();
+    loadProviders(force);
+    return true;
   } catch (e) {
     toast("Could not load the model list: " + e.message);
+    return false;
   }
 }
 
@@ -399,9 +401,9 @@ function bindPricingEvents() {
     const icon = $(".ms", e.currentTarget);
     icon.classList.add("spin");
     state.providers.key = null;
-    await loadCatalog(true);
+    const ok = await loadCatalog(true);
     icon.classList.remove("spin");
-    toast("Prices refreshed from OpenRouter");
+    if (ok) toast("Prices refreshed from OpenRouter");
   });
   $("#providersBox").addEventListener("toggle", () => { if ($("#providersBox").open) loadProviders(); });
 }

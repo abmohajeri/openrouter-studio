@@ -30,7 +30,7 @@ openrouter-studio = "app:main"
 openrouter = "main:main"
 
 [tool.setuptools]
-py-modules = ["openrouter_client", "app", "main", "example"]
+py-modules = ["openrouter_client", "app", "main"]
 include-package-data = true
 
 [tool.setuptools.package-data]

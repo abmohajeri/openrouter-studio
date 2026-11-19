@@ -12,6 +12,8 @@ if sys.version_info < (3, 9):
     print("OpenRouter Studio requires Python 3.9 or newer.", file=sys.stderr)
     sys.exit(1)
 
+import requests
+
 from openrouter_client import (
     DEFAULT_MODEL,
     ENV_FILE,
@@ -79,17 +81,24 @@ def setup() -> int:
     if not key:
         info("No key entered, nothing saved.")
         return 1
-    save_api_key(key)
-    info(f"Saved to {ENV_FILE}")
-
+    # Check the key first so a typo never replaces a working key in .env.
     try:
         data = OpenRouterClient(api_key=key).key_info()
     except OpenRouterError as e:
-        info(f"Warning: OpenRouter did not accept this key ({e}).")
+        info(f"OpenRouter did not accept this key ({e}). Nothing saved.")
         return 1
+    except requests.RequestException as e:
+        info(f"Couldn't reach OpenRouter to check the key ({e}). Nothing saved.")
+        return 1
+    try:
+        save_api_key(key)
+    except ValueError as e:
+        info(f"Not saved: {e}.")
+        return 1
+    info(f"Saved to {ENV_FILE}")
     limit = data.get("limit")
-    info(f"Key works. Label: {data.get('label', '?')}, "
-         f"used: ${data.get('usage', 0):.4f}, limit: {'none' if limit is None else f'${limit}'}")
+    info(f"Key works. Label: {data.get('label') or '?'}, "
+         f"used: {money(data.get('usage'))}, limit: {'none' if limit is None else money(limit)}")
     return 0
 
 
@@ -121,8 +130,9 @@ def show_usage() -> int:
         print(f"Free reqs  {free.get('used')} of {free.get('limit')} free-model requests used today")
     try:
         a = client.credits()
-        print(f"Account    {money(a['total_credits'] - a['total_usage'])} left ({money(a['total_credits'])} bought)")
-    except OpenRouterError:
+        bought, used = a.get("total_credits") or 0, a.get("total_usage") or 0
+        print(f"Account    {money(bought - used)} left ({money(bought)} bought)")
+    except (OpenRouterError, requests.RequestException):
         print("Account    balance needs a management key; see https://openrouter.ai/settings/credits")
     return 0
 
@@ -143,8 +153,10 @@ def list_models(text: str) -> int:
         price = m.get("pricing", {})
         try:
             cost = f"${float(price['prompt']) * 1e6:.2f} in / ${float(price['completion']) * 1e6:.2f} out per 1M tokens"
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, TypeError):
             cost = ""
+        if cost and float(price["prompt"]) < 0:
+            cost = "price varies (router model)"
         print(f"{m['id']:<55} ctx={m.get('context_length') or '?':<8} {cost}")
     info(f"\n{len(models)} model(s).")
     return 0
@@ -192,7 +204,9 @@ def run_once(client: OpenRouterClient, models: list[str], prompt: str,
                 answer = client.ask(prompt, model=model, system=args.system, **params)
                 if not args.output:
                     print(answer)
-        except OpenRouterError as e:
+        except (OpenRouterError, requests.RequestException) as e:
+            if stream:
+                print()
             info(f"Error from {model}: {e}")
             failed += 1
             answer = f"[error] {e}"
@@ -229,7 +243,7 @@ def chat_loop(client: OpenRouterClient, model: str, args: argparse.Namespace, pa
             messages = list(system)
             print("History cleared.")
             continue
-        if user.startswith("/model"):
+        if user == "/model" or user.startswith("/model "):
             parts = user.split(maxsplit=1)
             if len(parts) == 2:
                 model = parts[1]
@@ -244,7 +258,7 @@ def chat_loop(client: OpenRouterClient, model: str, args: argparse.Namespace, pa
                 print(piece, end="", flush=True)
                 reply += piece
             print()
-        except (OpenRouterError, KeyboardInterrupt) as e:
+        except (OpenRouterError, requests.RequestException, KeyboardInterrupt) as e:
             print(f"\n[{'stopped' if isinstance(e, KeyboardInterrupt) else f'error: {e}'}]")
             messages.pop()  # drop the unanswered question so history stays valid
             continue
@@ -254,6 +268,23 @@ def chat_loop(client: OpenRouterClient, model: str, args: argparse.Namespace, pa
 
 
 def main() -> int:
+    """Entry point (also used by the installed `openrouter` command)."""
+    try:
+        return _main()
+    except OpenRouterError as e:
+        info(f"Error: {e}")
+        return 1
+    except requests.RequestException as e:
+        info(f"Network error: {e}")
+        return 1
+    except OSError as e:  # e.g. -i points to a missing file
+        info(f"Error: {e}")
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+def _main() -> int:
     args = parse_args()
 
     if args.setup:
@@ -280,10 +311,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except OpenRouterError as e:
-        info(f"Error: {e}")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        sys.exit(130)
+    sys.exit(main())

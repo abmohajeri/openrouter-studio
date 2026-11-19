@@ -161,33 +161,45 @@ def build_catalog() -> dict:
 
 _catalog: dict = {"data": None, "time": 0.0}
 _catalog_lock = threading.Lock()
+CATALOG_MIN_REFRESH = 15  # a manual refresh within 15 s of the last fetch reuses it
 
 
 def get_catalog(force: bool = False) -> dict:
     with _catalog_lock:
         age = time.time() - _catalog["time"]
-        # A manual refresh (force=True) always re-fetches; the 15 s debounce
-        # only applies to automatic background refreshes.
-        if _catalog["data"] is None or age > CATALOG_TTL or force:
-            _catalog.update(data=build_catalog(), time=time.time())
+        stale = _catalog["data"] is None or age > CATALOG_TTL or (force and age > CATALOG_MIN_REFRESH)
+        if stale:
+            try:
+                _catalog.update(data=build_catalog(), time=time.time())
+            except (OpenRouterError, requests.RequestException):
+                if _catalog["data"] is None:
+                    raise
+                # OpenRouter is unreachable: keep serving the last good prices and retry later
+                _catalog["time"] = time.time() - CATALOG_TTL + 30
         return _catalog["data"]
 
 
 _providers: dict = {}
+PROVIDERS_MAX = 200
 
 
-def get_providers(model_id: str, image: bool) -> list[dict]:
+def get_providers(model_id: str, image: bool, force: bool = False) -> list[dict]:
     """Live per-provider prices for one model (cached for 2 minutes)."""
+    if not model_id or not re.fullmatch(r"[~A-Za-z0-9._:/-]{1,200}", model_id) or ".." in model_id:
+        raise ValueError("bad model id")
     key = (model_id, image)
     hit = _providers.get(key)
-    if hit and time.time() - hit[0] < PROVIDERS_TTL:
+    if hit and time.time() - hit[0] < (15 if force else PROVIDERS_TTL):
         return hit[1]
+    if len(_providers) >= PROVIDERS_MAX:
+        _providers.clear()
     data = orc.fetch_model_endpoints(model_id, image_model=image)
     rows = []
     for e in data.get("endpoints") or []:
         if image:
-            rows.append({"provider": e.get("provider_name") or e.get("provider_slug"),
-                         "pricing": e.get("pricing") or []})
+            prices = [{**pr, "cost_usd": _num(pr.get("cost_usd"))} if isinstance(pr, dict) and "cost_usd" in pr else pr
+                      for pr in (e.get("pricing") or [])]
+            rows.append({"provider": e.get("provider_name") or e.get("provider_slug"), "pricing": prices})
         else:
             rows.append({
                 "provider": e.get("provider_name"),
@@ -203,6 +215,17 @@ def get_providers(model_id: str, image: bool) -> list[dict]:
 
 
 # ---- files: chats and generated media ------------------------------------------------
+
+MEDIA_REF = re.compile(r"/media/([A-Za-z0-9_-]+\.[a-z0-9]{2,5})")
+VIDEO_REF = re.compile(r"/api/videos/([A-Za-z0-9_-]{1,128})/content")
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(name: str) -> threading.Lock:
+    with _locks_guard:
+        return _locks.setdefault(name, threading.Lock())
+
 
 def chat_path(chat_id: str) -> Path | None:
     return CHATS_DIR / f"{chat_id}.json" if SAFE_ID.match(chat_id) else None
@@ -286,19 +309,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def read_json(self):
+    def read_json(self) -> dict:
+        """Read a JSON object body. Raises ValueError for anything else."""
         length = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(length) or b"{}")
+        if length < 0:
+            raise ValueError("bad Content-Length")
+        data = json.loads(self.rfile.read(length) or b"{}")
+        if not isinstance(data, dict):
+            raise ValueError("body must be a JSON object")
+        return data
 
     def is_trusted(self, mutating: bool) -> bool:
         """Only answer requests from this machine's own UI (blocks other websites)."""
-        host = re.sub(r":\d+$", "", self.headers.get("Host", ""))
+        host_header = self.headers.get("Host", "")
+        host = re.sub(r":\d+$", "", host_header)
         if host not in LOCAL_HOSTS:
             self.send_json({"error": "forbidden host"}, 403)
             return False
         if mutating:
             origin = self.headers.get("Origin")
-            same_origin = origin is None or urlparse(origin).hostname in {"localhost", "127.0.0.1", "::1"}
+            # The Origin must be exactly this server (same host *and* port), not just any localhost app.
+            same_origin = origin is None or urlparse(origin).netloc == host_header
             is_json = (self.headers.get("Content-Type") or "").startswith("application/json")
             if not (same_origin and is_json):
                 self.send_json({"error": "forbidden"}, 403)
@@ -309,12 +340,16 @@ class Handler(BaseHTTPRequestHandler):
         """Call fn and send its result as JSON, turning failures into readable errors."""
         try:
             self.send_json(fn(*args))
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         except OpenRouterError as e:
             self.send_json({"error": str(e)}, 502)
         except requests.RequestException as e:
             self.send_json({"error": f"Network error: {e}"}, 502)
         except (KeyError, ValueError, TypeError) as e:
             self.send_json({"error": f"Bad request: {e}"}, 400)
+        except Exception as e:  # never drop the connection without an answer
+            self.send_json({"error": f"{type(e).__name__}: {e}"}, 500)
 
     def serve_file(self, path: Path, cache: str = "no-cache") -> None:
         """Send a file, honouring Range requests so audio/video can seek."""
@@ -370,7 +405,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.run_json(get_catalog, "refresh" in query)
             elif path == "/api/providers":
                 model = query.get("model", [""])[0]
-                self.run_json(get_providers, model, query.get("image", ["0"])[0] == "1")
+                self.run_json(get_providers, model, query.get("image", ["0"])[0] == "1", "refresh" in query)
             elif path == "/api/key":
                 self.run_json(self.key_info)
             elif path == "/api/spend":
@@ -385,13 +420,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/chats/"):
                 p = chat_path(path.rsplit("/", 1)[1])
                 if p and p.exists():
-                    self.send_json(json.loads(p.read_text(encoding="utf-8")))
+                    try:
+                        self.send_json(json.loads(p.read_text(encoding="utf-8")))
+                    except ValueError:
+                        self.send_json({"error": "this chat file is damaged"}, 500)
                 else:
                     self.send_json({"error": "chat not found"}, 404)
             elif m := re.fullmatch(r"/api/videos/([A-Za-z0-9_-]{1,128})", path):
                 self.run_json(self.video_status, m.group(1))
             elif m := re.fullmatch(r"/api/videos/([A-Za-z0-9_-]{1,128})/content", path):
-                self.video_content(m.group(1), int(query.get("index", ["0"])[0] or 0))
+                index = query.get("index", ["0"])[0] or "0"
+                if not index.isdigit():
+                    return self.send_json({"error": "bad index"}, 400)
+                self.video_content(m.group(1), int(index))
             elif path.startswith("/media/"):
                 name = path.rsplit("/", 1)[1]
                 target = MEDIA_DIR / name
@@ -439,13 +480,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def video_content(self, job_id: str, index: int) -> None:
         """Download a finished video once, keep it in ./media, then serve it from disk."""
-        cached = next(MEDIA_DIR.glob(f"video_{job_id}_{index}.*"), None) if MEDIA_DIR.exists() else None
+        def find_cached():
+            if not MEDIA_DIR.exists():
+                return None
+            return next((f for f in MEDIA_DIR.glob(f"video_{job_id}_{index}.*") if f.suffix != ".tmp"), None)
+
+        cached = find_cached()
         if cached is None:
-            data, ctype = OpenRouterClient().download_video(job_id, index)
-            ext = EXT_FOR_MIME.get(ctype.split(";")[0].strip(), "mp4")
-            MEDIA_DIR.mkdir(exist_ok=True)
-            cached = MEDIA_DIR / f"video_{job_id}_{index}.{ext}"
-            cached.write_bytes(data)
+            # A <video> element fires several Range requests at once: download only once,
+            # and never let a request see a half-written file.
+            with _lock_for(f"video:{job_id}:{index}"):
+                cached = find_cached()
+                if cached is None:
+                    data, ctype = OpenRouterClient().download_video(job_id, index)
+                    ext = EXT_FOR_MIME.get(ctype.split(";")[0].strip(), "mp4")
+                    MEDIA_DIR.mkdir(exist_ok=True)
+                    cached = MEDIA_DIR / f"video_{job_id}_{index}.{ext}"
+                    tmp = cached.with_name(cached.name + f".{uuid.uuid4().hex[:8]}.tmp")
+                    tmp.write_bytes(data)
+                    tmp.replace(cached)
         self.serve_file(cached, cache="max-age=31536000, immutable")
 
     # -- POST --
@@ -639,13 +692,19 @@ class Handler(BaseHTTPRequestHandler):
         p = chat_path(path.rsplit("/", 1)[1]) if path.startswith("/api/chats/") else None
         if not p:
             return self.send_json({"error": "bad chat id"}, 400)
-        chat = self.read_json()
-        if not isinstance(chat, dict):
-            return self.send_json({"error": "chat must be an object"}, 400)
+        try:
+            chat = self.read_json()
+        except ValueError as e:
+            return self.send_json({"error": f"Bad request: {e}"}, 400)
         CHATS_DIR.mkdir(exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(chat, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(p)
+        # Unique temp name: the UI can save the same chat twice at once (e.g. while streaming).
+        tmp = p.with_name(f"{p.stem}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            tmp.write_text(json.dumps(chat, ensure_ascii=False, indent=1), encoding="utf-8")
+            with _lock_for(f"chat:{p.stem}"):
+                tmp.replace(p)
+        finally:
+            tmp.unlink(missing_ok=True)
         self.send_json({"ok": True})
 
     def do_DELETE(self):
@@ -654,14 +713,28 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         p = chat_path(path.rsplit("/", 1)[1]) if path.startswith("/api/chats/") else None
         if p and p.exists():
+            text = p.read_text(encoding="utf-8")
+            # Files that another chat still shows (e.g. an image reused as a reference) are kept.
+            elsewhere = ""
+            for other in CHATS_DIR.glob("*.json"):
+                if other != p:
+                    try:
+                        elsewhere += other.read_text(encoding="utf-8")
+                    except OSError:
+                        pass
             # also remove the images/audio/videos this chat produced
-            for name in set(re.findall(r"/media/([A-Za-z0-9_-]+\.[a-z0-9]{2,5})", p.read_text(encoding="utf-8"))):
+            for name in set(MEDIA_REF.findall(text)) - set(MEDIA_REF.findall(elsewhere)):
                 (MEDIA_DIR / name).unlink(missing_ok=True)
-            for job_id in set(re.findall(r"/api/videos/([A-Za-z0-9_-]{1,128})/content", p.read_text(encoding="utf-8"))):
+            for job_id in set(VIDEO_REF.findall(text)) - set(VIDEO_REF.findall(elsewhere)):
                 for cached in MEDIA_DIR.glob(f"video_{job_id}_*"):  # downloaded copies of finished videos
                     cached.unlink(missing_ok=True)
             p.unlink()
         self.send_json({"ok": True})
+
+
+class StudioServer(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = 64  # the default (5) drops connections when the page fires many requests at once
 
 
 def main() -> None:
@@ -674,10 +747,9 @@ def main() -> None:
     MEDIA_DIR.mkdir(exist_ok=True)
 
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        server = StudioServer(("127.0.0.1", args.port), Handler)
     except OSError as e:
         raise SystemExit(f"Can't use port {args.port} ({e.strerror}). Try: python app.py --port 8001")
-    server.daemon_threads = True
 
     url = f"http://localhost:{args.port}"
     print(f"OpenRouter Studio running at {url}  (Ctrl+C to stop)")

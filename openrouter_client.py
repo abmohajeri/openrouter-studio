@@ -85,10 +85,17 @@ def load_dotenv(path: Path = ENV_FILE) -> None:
 
 def save_api_key(key: str, path: Path = ENV_FILE) -> None:
     """Write OPENROUTER_API_KEY into .env (keeping other lines) and use it right away."""
+    key = key.strip()
+    if not key or any(c.isspace() for c in key):
+        raise ValueError("an API key can't be empty or contain spaces or line breaks")
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
-    lines = [ln for ln in lines if not ln.strip().startswith("OPENROUTER_API_KEY")]
+    lines = [ln for ln in lines
+             if ln.strip().removeprefix("export ").split("=", 1)[0].strip() != "OPENROUTER_API_KEY"]
     lines.append(f"OPENROUTER_API_KEY={key}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Create the file owner-only from the start, so the key is never readable by others.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
     os.chmod(path, 0o600)
     os.environ["OPENROUTER_API_KEY"] = key
 
@@ -220,6 +227,7 @@ class OpenRouterClient:
 
         Extra keyword args (temperature, max_tokens, top_p, ...) are passed to the API as-is.
         """
+        self.last_model = self.last_usage = None
         resp = self.session.post(
             f"{BASE_URL}/chat/completions",
             json=self._payload(messages, model, params),
@@ -234,7 +242,10 @@ class OpenRouterClient:
             raise OpenRouterError(data["error"].get("message", str(data["error"])))
         self.last_model = data.get("model")
         self.last_usage = data.get("usage")
-        return data["choices"][0]["message"].get("content") or ""
+        choices = data.get("choices") or []
+        if not choices:
+            raise OpenRouterError(f"OpenRouter returned no answer: {str(data)[:300]}")
+        return (choices[0].get("message") or {}).get("content") or ""
 
     def chat_stream(self, messages: list[dict], model: str | None = None, **params) -> Iterator[str]:
         """Streaming version of chat(): yields text chunks as they arrive."""
@@ -253,6 +264,7 @@ class OpenRouterClient:
         payload = self._payload(messages, model, params)
         payload["stream"] = True
         payload.setdefault("usage", {"include": True})  # ask for token counts + cost
+        self.last_model = self.last_usage = None  # never report the previous call's cost
         with self.session.post(
             f"{BASE_URL}/chat/completions", json=payload, stream=True, timeout=self.timeout
         ) as resp:
@@ -264,7 +276,10 @@ class OpenRouterClient:
                 data = line[len("data: "):]
                 if data == "[DONE]":
                     break
-                chunk = json.loads(data)
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue  # skip a malformed line instead of losing the whole reply
                 if "error" in chunk:
                     raise OpenRouterError(chunk["error"].get("message", str(chunk["error"])))
                 self.last_model = chunk.get("model", self.last_model)

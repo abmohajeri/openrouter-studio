@@ -236,13 +236,17 @@ function newChat() {
   $("#input").focus();
 }
 
+let openSeq = 0;
 async function openChat(id) {
   closeDrawers();
   if (state.chat?.id === id) return;
   stopRun();
   flushSave();
+  const token = ++openSeq;
   try {
-    state.chat = normalizeChat(await api(`/api/chats/${encodeURIComponent(id)}`));
+    const loaded = normalizeChat(await api(`/api/chats/${encodeURIComponent(id)}`));
+    if (token !== openSeq) return; // the user clicked another chat meanwhile
+    state.chat = loaded;
     store.set("lastChat", id);
     state.pending = [];
     renderAll();
@@ -257,7 +261,7 @@ let saveTimer = null;
 let saveTarget = null;
 
 function saveChat(chat = state.chat) {
-  if (!chat || (!chat.messages.length && !chat.system.trim())) return; // don't save empty chats
+  if (!chat || chat.deleted || (!chat.messages.length && !chat.system.trim())) return; // don't save empty or deleted chats
   chat.updated = Date.now();
   if (saveTarget && saveTarget !== chat) flushSave();
   saveTarget = chat;
@@ -270,11 +274,14 @@ function flushSave(keepalive = false) {
   clearTimeout(saveTimer);
   const chat = saveTarget;
   saveTarget = null;
-  if (!chat) return;
+  if (!chat || chat.deleted) return;
+  const body = JSON.stringify(chat);
+  // Browsers refuse keepalive requests over 64 KB; send big chats normally and hope the page lives long enough.
+  if (keepalive && body.length > 60000) keepalive = false;
   fetch(`/api/chats/${encodeURIComponent(chat.id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(chat),
+    body,
     keepalive,
   }).then((r) => { if (!r.ok) throw new Error(r.statusText); if (state.chat === chat) store.set("lastChat", chat.id); })
     .catch((e) => toast("Saving failed: " + e.message));
@@ -295,9 +302,11 @@ async function loadChatList() {
 async function deleteChat(id) {
   const c = state.chats.find((x) => x.id === id);
   if (!confirm(`Delete “${c?.title || "this chat"}” and the files it generated?`)) return;
+  const open = state.chat?.id === id ? state.chat : null;
+  if (open) { open.deleted = true; stopRun(); } // a running reply must not save the chat back afterwards
   if (saveTarget?.id === id) { clearTimeout(saveTimer); saveTarget = null; }
   try { await api(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" }); }
-  catch (e) { return toast("Delete failed: " + e.message); }
+  catch (e) { if (open) delete open.deleted; return toast("Delete failed: " + e.message); }
   state.chats = state.chats.filter((x) => x.id !== id);
   if (state.chat?.id === id) newChat(); else renderChatList();
 }
@@ -313,6 +322,7 @@ function switchKind(kind, model) {
   const chat = state.chat;
   model ||= modelInfo(chat.model).modes.includes(kind) ? chat.model : null;
   if (chat.messages.length) {
+    stopRun();
     flushSave();
     state.chat = newChatObject(kind, model);
     state.pending = [];
@@ -819,8 +829,10 @@ function buildParams(chat, info) {
   if (isStructuredChat(chat)) Object.assign(out, structuredParams(chat, info));
   if (info.output.includes("audio")) {
     out.modalities = ["text", "audio"];
-    out.audio = { format: p.audioFormat || (info.id.startsWith("openai/") ? "pcm16" : "wav") };
-    const voice = p.voice || $("#audioVoice").value;
+    out.audio = { format: $("#audioFormat").value || (info.id.startsWith("openai/") ? "pcm16" : "wav") };
+    // the remembered voice may belong to another model: only send it if this model offers it
+    const offered = $$("#audioVoice option").map((o) => o.value);
+    const voice = offered.includes(p.voice) ? p.voice : $("#audioVoice").value;
     if (voice && !$("#audioVoice").hidden) out.audio.voice = voice;
   }
   // PDFs work on every model: if it can't read files itself, OpenRouter's free parser turns them into text.
@@ -861,6 +873,7 @@ async function onRun() {
     autosize(input);
     renderPending();
     renderMessages();
+    saveChat(chat);
   }
   if (chat.messages.at(-1)?.role !== "user") return toast(KINDS[kind].needInput || "Type a message first.");
   scrollToBottom();
@@ -910,7 +923,10 @@ async function generate() {
       while ((i = buf.indexOf("\n\n")) >= 0) {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 2);
-        if (line.startsWith("data:")) handleEvent(msg, JSON.parse(line.slice(5)));
+        if (!line.startsWith("data:")) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(5)); } catch { continue; } // skip one bad line, keep the reply
+        handleEvent(msg, ev);
       }
       schedulePaint(msg);
     }
@@ -925,12 +941,13 @@ async function generate() {
     state.controller = null;
     state.streamingId = null;
     setRunning(false);
-    if (el.isConnected) {
+    if (state.chat === chat) {
+      // look the node up again: a re-render during the run may have replaced `el`
       const stick = isNearBottom();
-      el.replaceWith(messageEl(msg));
+      repaintMessage(msg);
       if (stick) scrollToBottom();
+      updateStats();
     }
-    if (state.chat === chat) updateStats();
     saveChat(chat);
     refreshCreditsSoon();
   }
@@ -985,6 +1002,7 @@ function startEdit(el, m) {
   ta.addEventListener("input", () => autosize(ta, window.innerHeight * 0.6));
 
   const finish = (act) => {
+    if (act === "run" && state.controller) return toast("Stop the current run first.");
     if (act !== "cancel") {
       if (m.fields) {
         try { m.fields = JSON.parse(ta.value); } catch { return toast("Keep it valid JSON, like {\"name\": \"value\"}."); }
@@ -1165,13 +1183,15 @@ async function toggleRecording() {
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch { return toast("Microphone permission was denied."); }
   const chunks = [];
-  recorder = new MediaRecorder(stream);
-  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-  recorder.done = new Promise((resolve) => {
-    recorder.onstop = async () => {
+  const rec = new MediaRecorder(stream);
+  recorder = rec;
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  rec.done = new Promise((resolve) => {
+    rec.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
       try {
-        const wav = await blobToWav(new Blob(chunks, { type: recorder.mimeType }));
+        // `recorder` is already null here (stopRecording clears it first), so use the local reference.
+        const wav = await blobToWav(new Blob(chunks, { type: rec.mimeType }));
         const file = new File([wav], `recording-${new Date().toTimeString().slice(0, 8).replace(/:/g, "")}.wav`, { type: "audio/wav" });
         await addFiles([file]);
       } catch (e) {
@@ -1180,7 +1200,7 @@ async function toggleRecording() {
       resolve();
     };
   });
-  recorder.start();
+  rec.start();
   const started = Date.now();
   $("#recording").hidden = false;
   $("#micBtn").classList.add("recording-on");
@@ -1405,6 +1425,7 @@ async function saveKey() {
   const key = $("#keyInput").value.trim();
   if (!key) { $("#keyError").textContent = "Please paste your key."; return; }
   const btn = $("#saveKeyBtn");
+  if (btn.disabled) return; // already checking
   btn.disabled = true;
   btn.textContent = "Checking…";
   try {

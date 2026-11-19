@@ -302,6 +302,7 @@ openrouter/
 ├── openrouter_client.py    # the Python library (OpenRouterClient + model aliases)
 ├── main.py                 # command-line tool
 ├── example.py              # library examples
+├── tests/                  # offline tests: python -m unittest discover tests
 ├── docs/screenshots/       # images used in this README
 ├── requirements.txt
 ├── .env.example            # template for your API key
@@ -329,11 +330,17 @@ flowchart LR
 | Saved chats / generated files | `chats/` and `media/` (deleting a chat also deletes its files) |
 | Theme, recent models, last settings | your browser's local storage |
 
+## Development
+
+```bash
+python -m unittest discover tests   # offline: never calls OpenRouter, uses a temp folder
+```
+
 ## Privacy and security
 
 - The server only listens on `127.0.0.1`.
 - It rejects requests from other websites: it checks the `Host` header, and every change needs a
-  same-origin JSON request.
+  JSON request from this exact origin (same host and port, so other local apps can't make changes either).
 - Your API key is read on the server and **never sent to the browser**. `.env` is saved with
   owner-only permissions (`600`).
 - Chats and generated files stay on your disk. Only your prompts and files go to OpenRouter and the

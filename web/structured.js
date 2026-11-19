@@ -289,7 +289,10 @@ function bindStructureEvents() {
   $("#addOutputBtn").addEventListener("click", () => {
     const chat = state.chat;
     chat.outputs ||= [];
-    chat.outputs.push(field({ key: `field_${chat.outputs.length + 1}`, type: "text" }));
+    const taken = new Set(chat.outputs.map((f) => f.key.trim()));
+    let n = chat.outputs.length + 1;
+    while (taken.has(`field_${n}`)) n++;
+    chat.outputs.push(field({ key: `field_${n}`, type: "text" }));
     changed(true);
     $("#outputList .q-card:last-child .q-key")?.select();
   });
@@ -454,7 +457,7 @@ function finishStructured(msg) {
   try {
     let data = parseJsonReply(msg.content);
     if (msg.schema.many && data && !Array.isArray(data)) data = Array.isArray(data.items) ? data.items : [data];
-    const rows = msg.schema.many ? data : [data];
+    const rows = msg.schema.many ? (Array.isArray(data) ? data : [data]) : [data];
     const issues = [];
     rows.forEach((row, i) => {
       if (!row || typeof row !== "object") { issues.push(`${msg.schema.many ? `item ${i + 1}` : "reply"} is not an object`); return; }
@@ -548,7 +551,8 @@ function toCSV(data) {
   const cols = [...new Set(rows.flatMap((r) => Object.keys(r || {})))];
   const cell = (v) => {
     const s = v === null || v === undefined ? "" : Array.isArray(v) ? v.join("; ") : typeof v === "object" ? JSON.stringify(v) : String(v);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    const safe = /^[=+\-@\t\r]/.test(s) ? "'" + s : s; // stop spreadsheets from running model output as a formula
+    return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
   return [cols.join(","), ...rows.map((r) => cols.map((c) => cell(r?.[c])).join(","))].join("\n");
 }
@@ -743,6 +747,14 @@ for name, answer in result["answers"].items():
 /** The empty state and suggestions for chat with structured output on. */
 const STRUCT_CHAT_VIEW = {
   ...KINDS.chat,
+  validate: (text, atts, chat) => {
+    const keys = (chat.outputs || []).map((f) => f.key.trim()).filter(Boolean);
+    const dup = keys.find((k, i) => keys.indexOf(k) !== i);
+    if (dup) return `Two output fields are named “${dup}”. Give each a different name.`;
+    const emptyChoice = (chat.outputs || []).find((f) => f.key.trim() && f.type === "choice" && !(f.options || []).some((o) => o.trim()));
+    if (emptyChoice) return `Add at least one option to the choice field “${emptyChoice.key.trim()}”.`;
+    return null;
+  },
   placeholder: "Paste the text to analyze…",
   title: "Get typed, structured answers",
   text: "Define the output structure above: text, numbers, booleans, choices, lists, dates. The model has to answer with JSON in exactly that shape, and you get a typed result to copy as JSON or CSV.",
