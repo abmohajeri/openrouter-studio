@@ -339,6 +339,7 @@ flowchart LR
 | Port / browser | `python app.py --port 9000 --no-browser` (or `openrouter-studio --port 9000 --no-browser`) |
 | Short names and default model | `MODEL_ALIASES` and `DEFAULT_MODEL` in `openrouter_studio/client.py` |
 | Saved chats / generated files | `chats/` and `media/` in the data folder (deleting a chat also deletes its files) |
+| How long chats are kept | Forever by default. `python app.py --keep-days 30` deletes chats not updated in 30 days, with their files (checked at start and every 6 hours). |
 | Theme, recent models, last settings | your browser's local storage |
 
 ## Development

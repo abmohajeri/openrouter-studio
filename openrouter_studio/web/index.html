@@ -212,6 +212,22 @@
         <div class="model-tags" id="modelTags"></div>
       </div>
 
+      <!-- the most-used chat settings, right under the model -->
+      <div id="chatQuickSettings">
+        <div class="field" id="thinkingField">
+          <label>Thinking</label>
+          <div class="segmented" id="reasoning"></div>
+          <div class="field-note" id="thinkingNote"></div>
+        </div>
+
+        <div class="field">
+          <div class="label-row"><label for="temperature">Temperature</label>
+            <input class="num" type="number" id="temperatureNum" min="0" max="2" step="0.05"></div>
+          <input type="range" id="temperature" min="0" max="2" step="0.05">
+          <div class="range-hint"><span>Precise</span><span>Creative</span></div>
+        </div>
+      </div>
+
       <!-- live pricing -->
       <div class="field price-card" id="priceCard">
         <div class="price-head">
@@ -249,19 +265,6 @@
             </select>
           </div>
           <div class="field-note">This model can answer with audio. Its spoken reply plays under the text.</div>
-        </div>
-
-        <div class="field">
-          <div class="label-row"><label for="temperature">Temperature</label>
-            <input class="num" type="number" id="temperatureNum" min="0" max="2" step="0.05"></div>
-          <input type="range" id="temperature" min="0" max="2" step="0.05">
-          <div class="range-hint"><span>Precise</span><span>Creative</span></div>
-        </div>
-
-        <div class="field" id="thinkingField">
-          <label>Thinking</label>
-          <div class="segmented" id="reasoning"></div>
-          <div class="field-note" id="thinkingNote"></div>
         </div>
 
         <details class="advanced" id="advanced">

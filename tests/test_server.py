@@ -14,6 +14,7 @@ import stat
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -138,6 +139,32 @@ class ServerTests(unittest.TestCase):
         self.assertFalse((app.MEDIA_DIR / "own.png").exists())
         self.request("DELETE", "/api/chats/b1", {})
         self.assertFalse((app.MEDIA_DIR / "shared.png").exists())
+
+    def test_prune_old_chats(self):
+        day_ms = 86400 * 1000
+        now_ms = time.time() * 1000
+        (app.MEDIA_DIR / "old_only.png").write_bytes(b"x")
+        (app.MEDIA_DIR / "shared2.png").write_bytes(b"x")
+        chats = {
+            "old1": {"updated": now_ms - 40 * day_ms, "messages": [{"images": ["/media/old_only.png", "/media/shared2.png"]}]},
+            "new1": {"updated": now_ms - 2 * day_ms, "messages": [{"images": ["/media/shared2.png"]}]},
+        }
+        for cid, chat in chats.items():
+            (app.CHATS_DIR / f"{cid}.json").write_text(json.dumps(chat))
+        old_time = time.time() - 40 * 86400
+        os.utime(app.CHATS_DIR / "old1.json", (old_time, old_time))
+        (app.CHATS_DIR / "broken.json").write_text("{not json")
+        os.utime(app.CHATS_DIR / "broken.json", (old_time, old_time))
+
+        self.assertEqual(app.prune_old_chats(30), 1)
+        self.assertFalse((app.CHATS_DIR / "old1.json").exists())
+        self.assertTrue((app.CHATS_DIR / "new1.json").exists())
+        self.assertTrue((app.CHATS_DIR / "broken.json").exists())  # damaged files are left alone
+        self.assertFalse((app.MEDIA_DIR / "old_only.png").exists())
+        self.assertTrue((app.MEDIA_DIR / "shared2.png").exists())  # still used by new1
+        for name in ("new1.json", "broken.json"):
+            (app.CHATS_DIR / name).unlink()
+        (app.MEDIA_DIR / "shared2.png").unlink()
 
     def test_range_requests(self):
         (app.MEDIA_DIR / "clip.mp4").write_bytes(bytes(range(100)))

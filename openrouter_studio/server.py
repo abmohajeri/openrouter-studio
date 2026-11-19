@@ -277,6 +277,46 @@ def studio_spend() -> dict:
             "by_model": [{"model": k, "cost": v} for k, v in top[:8]], "by_kind": by_kind}
 
 
+def delete_chats(paths: list[Path]) -> None:
+    """Delete chat files and the images/audio/videos only they use.
+
+    Files that a remaining chat still shows (e.g. an image reused as a reference) are kept.
+    """
+    doomed = set(paths)
+    if not doomed:
+        return
+    removed_text, kept_text = [], []
+    for f in CHATS_DIR.glob("*.json"):
+        try:
+            (removed_text if f in doomed else kept_text).append(f.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+    removed, kept = "\n".join(removed_text), "\n".join(kept_text)
+    for name in set(MEDIA_REF.findall(removed)) - set(MEDIA_REF.findall(kept)):
+        (MEDIA_DIR / name).unlink(missing_ok=True)
+    for job_id in set(VIDEO_REF.findall(removed)) - set(VIDEO_REF.findall(kept)):
+        for cached in MEDIA_DIR.glob(f"video_{job_id}_*"):  # downloaded copies of finished videos
+            cached.unlink(missing_ok=True)
+    for p in doomed:
+        p.unlink(missing_ok=True)
+
+
+def prune_old_chats(keep_days: float) -> int:
+    """Delete chats not updated in `keep_days` days (and their files). Returns how many."""
+    cutoff = time.time() - keep_days * 86400
+    old = []
+    for f in CHATS_DIR.glob("*.json"):
+        try:
+            updated = (json.loads(f.read_text(encoding="utf-8")).get("updated") or 0) / 1000
+            last = max(updated, f.stat().st_mtime)  # whichever is newer, so we never delete too early
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue  # unreadable or damaged: leave it for the user to look at
+        if last < cutoff:
+            old.append(f)
+    delete_chats(old)
+    return len(old)
+
+
 def save_media(data: bytes, ext: str) -> str:
     MEDIA_DIR.mkdir(exist_ok=True)
     name = f"{uuid.uuid4().hex[:20]}.{ext}"
@@ -716,22 +756,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         p = chat_path(path.rsplit("/", 1)[1]) if path.startswith("/api/chats/") else None
         if p and p.exists():
-            text = p.read_text(encoding="utf-8")
-            # Files that another chat still shows (e.g. an image reused as a reference) are kept.
-            elsewhere = ""
-            for other in CHATS_DIR.glob("*.json"):
-                if other != p:
-                    try:
-                        elsewhere += other.read_text(encoding="utf-8")
-                    except OSError:
-                        pass
-            # also remove the images/audio/videos this chat produced
-            for name in set(MEDIA_REF.findall(text)) - set(MEDIA_REF.findall(elsewhere)):
-                (MEDIA_DIR / name).unlink(missing_ok=True)
-            for job_id in set(VIDEO_REF.findall(text)) - set(VIDEO_REF.findall(elsewhere)):
-                for cached in MEDIA_DIR.glob(f"video_{job_id}_*"):  # downloaded copies of finished videos
-                    cached.unlink(missing_ok=True)
-            p.unlink()
+            delete_chats([p])
         self.send_json({"ok": True})
 
 
@@ -740,10 +765,40 @@ class StudioServer(ThreadingHTTPServer):
     request_queue_size = 64  # the default (5) drops connections when the page fires many requests at once
 
 
+def positive_days(value: str) -> float:
+    try:
+        days = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number of days: {value!r}") from None
+    if not days > 0:
+        raise argparse.ArgumentTypeError("must be more than 0 days")
+    return days
+
+
+def start_pruning(keep_days: float) -> None:
+    """Delete old chats now, then once every 6 hours while the server runs."""
+    def run():
+        try:
+            n = prune_old_chats(keep_days)
+        except OSError as e:
+            print(f"Could not clean up old chats: {e}")
+        else:
+            if n:
+                print(f"Deleted {n} chat{'s' if n != 1 else ''} not used in {keep_days:g} days.")
+        timer = threading.Timer(6 * 3600, run)
+        timer.daemon = True
+        timer.start()
+
+    run()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local web UI for OpenRouter.")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
+    parser.add_argument("--keep-days", type=positive_days, metavar="DAYS",
+                        help="delete chats (and their files) not updated in this many days; "
+                             "checked at start and every 6 hours (default: keep forever)")
     args = parser.parse_args()
 
     CHATS_DIR.mkdir(parents=True, exist_ok=True)
@@ -757,6 +812,9 @@ def main() -> None:
     url = f"http://localhost:{args.port}"
     print(f"OpenRouter Studio running at {url}  (Ctrl+C to stop)")
     print(f"Chats and files: {orc.DATA_DIR}")
+    if args.keep_days:
+        print(f"Chats not updated in {args.keep_days:g} days are deleted automatically.")
+        start_pruning(args.keep_days)
     if not args.no_browser:
         threading.Timer(0.6, webbrowser.open, [url]).start()
     try:

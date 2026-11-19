@@ -471,6 +471,7 @@ function renderSettings() {
   const kind = kindOf(chat);
   const p = chat.params;
   $("#chatSettings").hidden = kind !== "chat";
+  $("#chatQuickSettings").hidden = kind !== "chat";
   if (kind === "chat") {
     $("#temperature").value = p.temperature;
     $("#temperatureNum").value = p.temperature;
