@@ -356,8 +356,10 @@ function bindStructureEvents() {
     chat.structured = on;
     // start from an example structure; templates from the empty state also add input fields
     if (on && !(chat.outputs || []).length) chat.outputs = STRUCT_TEMPLATES.triage.outputs.map(field);
+    // keep the editor collapsed to its summary line: it must not take over the page
+    if (on) $("#outputsBox").open = false;
     renderWorkspace(); renderSettings(); saveChat(); updateStats();
-    if (on) toast("Structured output on: the model answers with typed JSON in your output structure.");
+    if (on) toast("Structured output on. Click “Output structure” at the top to edit the fields.");
   };
   $("#structuredToggle").addEventListener("change", (e) => setStructured(e.target.checked));
   $("#structChip").addEventListener("click", () => setStructured(!state.chat.structured));
@@ -601,11 +603,6 @@ KINDS.extract = {
     if (!text && !atts.length && !usesInputFields(chat)) return "Paste some text first.";
     return null;
   },
-  suggestions: Object.entries(EXTRACT_TEMPLATES).map(([k, t]) => ({
-    icon: { invoice: "receipt_long", contact: "contact_mail", listing: "sell" }[k] || "table_view",
-    label: `Try: ${t.label.toLowerCase()}`,
-    action: () => { $("#input").value = ""; loadStructTemplate(k); $("#input").value = t.sample; autosize($("#input")); updateStats(); },
-  })),
 };
 MODALITY.extract = { icon: "table_view", label: "Fields" };
 MODALITY.json = { icon: "data_object", label: "JSON" };
@@ -744,7 +741,7 @@ for name, answer in result["answers"].items():
 `;
 }
 
-/** The empty state and suggestions for chat with structured output on. */
+/** The empty state for chat with structured output on. */
 const STRUCT_CHAT_VIEW = {
   ...KINDS.chat,
   validate: (text, atts, chat) => {
@@ -758,9 +755,4 @@ const STRUCT_CHAT_VIEW = {
   placeholder: "Paste the text to analyze…",
   title: "Get typed, structured answers",
   text: "Define the output structure above: text, numbers, booleans, choices, lists, dates. The model has to answer with JSON in exactly that shape, and you get a typed result to copy as JSON or CSV.",
-  suggestions: Object.entries(STRUCT_TEMPLATES).map(([k, t]) => ({
-    icon: { triage: "support_agent", contact: "contact_mail", actions: "checklist", review: "reviews" }[k] || "data_object",
-    label: `Try: ${t.label.toLowerCase()}`,
-    action: () => { $("#input").value = ""; loadStructTemplate(k); },
-  })),
 };

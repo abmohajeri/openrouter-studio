@@ -412,6 +412,9 @@ function renderHeader() {
   $("#chatTitle").value = chat.title;
   $("#systemInput").value = chat.system;
   $("#systemBox").open = false;
+  // Structured output shows its editor as a one-line summary (click to edit), so it never replaces
+  // the page. Extract mode is all about its fields, so a new Extract chat opens them.
+  $("#outputsBox").open = kind === "extract" && !chat.messages.length;
   updateSystemPreview();
   document.title = `${chat.title} · OpenRouter Studio`;
   $("#kindBadge").innerHTML = `<span class="ms">${KINDS[kind].icon}</span><span class="hide-sm">${KINDS[kind].label}</span>`;
@@ -452,8 +455,6 @@ function renderWorkspace() {
   $("#emptyTitle").textContent = k.title;
   $("#emptyText").textContent = k.text;
   $("#emptyIO").innerHTML = ioStripHTML(m, kind, true, st);
-  $("#suggestions").innerHTML = (k.suggestions || []).map((s, i) =>
-    `<button data-sug="${i}"><span class="ms">${s.icon}</span><span>${esc(s.label || s.text)}</span></button>`).join("");
 
   // drop attachments the new model can't take
   const before = state.pending.length;
@@ -1660,17 +1661,6 @@ function bindEvents() {
 
   // empty state
   $("#emptyModelBtn").addEventListener("click", () => openModelPicker());
-  $("#suggestions").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-sug]");
-    if (!b) return;
-    const s = viewOf(state.chat).suggestions[+b.dataset.sug];
-    if (s.action) return s.action();
-    const input = $("#input");
-    input.value = s.text;
-    autosize(input);
-    input.focus();
-    updateStats();
-  });
 
   // messages
   $("#messages").addEventListener("click", (e) => {
@@ -1842,6 +1832,10 @@ function bindEvents() {
   });
 
   window.addEventListener("beforeunload", () => flushSave(true));
+  // The app always fills the window and each panel scrolls on its own, so the page itself must never
+  // scroll. If focusing something ever makes the browser scroll it, snap back instead of leaving
+  // the whole app shifted up with an empty gap below.
+  window.addEventListener("scroll", () => { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); });
   bindModeEvents();    // modes.js
   bindStructureEvents(); // structured.js
   bindPricingEvents(); // pricing.js

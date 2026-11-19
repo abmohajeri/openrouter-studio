@@ -14,12 +14,6 @@ const KINDS = {
     placeholder: "Type something…",
     title: "What can I help you build?",
     text: "Chat with GPT, Gemini, Claude, DeepSeek, Grok and hundreds more. Attach whatever the model can read.",
-    suggestions: [
-      { icon: "school", text: "Explain quantum computing like I'm 12" },
-      { icon: "terminal", text: "Write a Python function that merges two sorted lists" },
-      { icon: "translate", text: "Translate “Good morning, how are you?” into 5 languages" },
-      { icon: "lightbulb", text: "Give me 5 startup ideas that use AI for education" },
-    ],
   },
   image: {
     label: "Image", icon: "image", run: "Generate", runIcon: "auto_awesome", busy: "Generating image…",
@@ -28,12 +22,6 @@ const KINDS = {
     title: "Create an image",
     text: "Describe what you want. If the model takes images as input, attach references to edit or restyle them.",
     validate: (text) => (!text ? "Describe the image first." : null),
-    suggestions: [
-      { icon: "chair", text: "A cozy reading nook by a rainy window, warm light, watercolor style" },
-      { icon: "local_cafe", text: "Flat vector logo for a coffee shop called Moon Bean" },
-      { icon: "location_city", text: "Isometric 3D illustration of a tiny city on a floating island" },
-      { icon: "photo_camera", text: "Product photo of a glass water bottle on a marble table, soft shadows" },
-    ],
   },
   video: {
     label: "Video", icon: "movie", run: "Generate", runIcon: "auto_awesome", busy: "Submitting video job…",
@@ -41,12 +29,6 @@ const KINDS = {
     title: "Generate a video",
     text: "Describe a scene. Attach an image to use it as the first frame (and a second one as the last frame). Jobs run in the background and usually take 30 seconds to a few minutes.",
     validate: (text) => (!text ? "Describe the video first." : null),
-    suggestions: [
-      { icon: "landscape", text: "A drone shot flying over misty mountains at sunrise, cinematic" },
-      { icon: "skateboarding", text: "A cat wearing sunglasses skateboarding down a sunny street, slow motion" },
-      { icon: "nightlight", text: "Time-lapse of a city skyline turning from day to night" },
-      { icon: "waves", text: "Ocean waves crashing on black sand, close-up, golden hour" },
-    ],
   },
   speech: {
     label: "Speech", icon: "record_voice_over", run: "Speak", runIcon: "volume_up", busy: "Synthesizing speech…",
@@ -54,11 +36,6 @@ const KINDS = {
     title: "Turn text into speech",
     text: "Type the text, pick a voice in Run settings, and get an audio file you can play or download.",
     validate: (text) => (!text ? "Type the text to speak first." : null),
-    suggestions: [
-      { icon: "waving_hand", text: "Welcome to OpenRouter Studio! This voice was generated in just a few seconds." },
-      { icon: "translate", text: "سلام! این یک نمونه صدای فارسی است که با هوش مصنوعی ساخته شده." },
-      { icon: "auto_stories", text: "Once upon a time, a tiny robot learned to paint the stars, one color at a time." },
-    ],
   },
   transcription: {
     label: "Transcribe", icon: "subtitles", run: "Transcribe", runIcon: "subtitles", busy: "Transcribing…",
@@ -67,10 +44,6 @@ const KINDS = {
     title: "Transcribe audio",
     text: "Record from your microphone or upload an audio file and get the text back. Turn on timestamps in Run settings for segments.",
     validate: (text, atts) => (!atts.some((a) => a.kind === "audio") ? "Attach or record audio first." : null),
-    suggestions: [
-      { icon: "mic", label: "Record from microphone", action: () => toggleRecording() },
-      { icon: "upload_file", label: "Upload an audio file", action: () => $("#fileInput").click() },
-    ],
   },
   decisions: {
     label: "Decide", icon: "rule", run: "Decide", runIcon: "bolt", busy: "Deciding…",
@@ -79,12 +52,6 @@ const KINDS = {
     title: "Ask a decision model",
     text: "Decision models like Jev don't write text. They read your item and answer your questions with probabilities. That makes them fast, cheap and easy to use in code.",
     validate: validateDecision,
-    suggestions: [
-      { icon: "support_agent", label: "Try: support ticket triage", action: () => loadTemplate("triage", true) },
-      { icon: "reviews", label: "Try: review sentiment", action: () => loadTemplate("sentiment", true) },
-      { icon: "shield", label: "Try: content moderation", action: () => loadTemplate("moderation", true) },
-      { icon: "crop_free", label: "Try: find an object in a photo", action: () => loadTemplate("photo", true) },
-    ],
   },
   embeddings: {
     label: "Embed", icon: "scatter_plot", run: "Embed", runIcon: "scatter_plot", busy: "Embedding…",
@@ -92,10 +59,6 @@ const KINDS = {
     title: "Compare texts with embeddings",
     text: "Put one text per line. You get a vector for each line and a map of how similar they are.",
     validate: (text) => (!text.trim() ? "Add at least one line of text." : null),
-    suggestions: [
-      { icon: "compare_arrows", label: "Compare 4 sentences", text: SAMPLE_SENTENCES },
-      { icon: "search", label: "Search-style: query vs. documents", text: "How do I reset my password?\nTo change your password, open Settings → Security.\nOur office is open Monday to Friday.\nForgot your login? Use the 'Reset password' link." },
-    ],
   },
 };
 
