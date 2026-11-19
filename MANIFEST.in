@@ -3,5 +3,8 @@ include .env.example
 include requirements.txt
 include pyproject.toml
 include MANIFEST.in
-graft web
+graft openrouter_studio/web
 graft docs
+graft tests
+include app.py main.py example.py
+global-exclude __pycache__ *.py[cod]

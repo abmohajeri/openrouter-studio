@@ -62,15 +62,19 @@ python app.py          # opens http://localhost:8000
 > On some macOS setups, `pip` is aliased to the system Python, which would install
 > packages outside your virtual environment.
 
-Or install it as a proper package (gives you the `openrouter-studio` and `openrouter` commands):
+Or install it as a package (gives you the `openrouter-studio` and `openrouter` commands):
 
 ```bash
 cd openrouter-studio
 source .venv/bin/activate
-python -m pip install -e .
-openrouter-studio      # opens http://localhost:8000
+python -m pip install --upgrade pip   # editable installs need pip 21.3 or newer
+python -m pip install -e .            # editable: keeps .env, chats/ and media/ in this folder
+openrouter-studio      # opens http://localhost:8000  (same as: python -m openrouter_studio)
 openrouter "Hello"     # CLI tool
 ```
+
+A regular `python -m pip install .` works too. Your key, chats and generated files then go to
+`~/.openrouter-studio/` (see [Configuration](#configuration)).
 
 On first start the page asks for your API key ([get one here](https://openrouter.ai/keys)) and
 saves it to `.env`. Prefer the terminal? Run `python main.py --setup`, or copy `.env.example` to
@@ -178,6 +182,8 @@ The same in the terminal: `python main.py --usage`.
 
 ## Command line
 
+Installed with pip? Type `openrouter` wherever you see `python main.py`.
+
 ```bash
 python main.py "What is Python?"                         # default model (gpt)
 python main.py -m gemini "Explain black holes"           # pick a model by short name…
@@ -210,10 +216,10 @@ python main.py --usage                                   # your key's limit and 
 
 ## Python library
 
-`openrouter_client.py` is a single file you can import anywhere.
+The client lives in `openrouter_studio/client.py`. Both import names work:
 
 ```python
-from openrouter_client import OpenRouterClient
+from openrouter_studio import OpenRouterClient   # or: from openrouter_client import OpenRouterClient
 
 client = OpenRouterClient()   # reads OPENROUTER_API_KEY from the environment or .env
 
@@ -283,24 +289,28 @@ You can use these anywhere a model id is accepted.
 | `claude-opus` | `anthropic/claude-opus-5.5` | | `free` | `google/gemma-4-31b-it:free` |
 | `claude-haiku` | `anthropic/claude-haiku-5.5` | | `jev` | `~typesafe/jev-latest` (decision model) |
 
-Edit `MODEL_ALIASES` and `DEFAULT_MODEL` in `openrouter_client.py` to change them.
+Edit `MODEL_ALIASES` and `DEFAULT_MODEL` in `openrouter_studio/client.py` to change them.
 
 ---
 
 ## Project layout
 
 ```
-openrouter/
-├── app.py                  # web studio server (Python standard library + requests)
-├── web/
-│   ├── index.html          # page layout
-│   ├── style.css           # dark/light themes, responsive layout
-│   ├── app.js              # core: chats, composer, chat streaming, model picker
-│   ├── modes.js            # Decide, Image, Video, Speech, Transcribe, Embed
-│   ├── structured.js       # input fields, output structure, Extract mode
-│   └── pricing.js          # live prices, estimates, usage & limits
-├── openrouter_client.py    # the Python library (OpenRouterClient + model aliases)
-├── main.py                 # command-line tool
+openrouter-studio/
+├── openrouter_studio/      # the installable package
+│   ├── client.py           # the Python library (OpenRouterClient + model aliases)
+│   ├── server.py           # web studio server (Python standard library + requests)
+│   ├── cli.py              # command-line tool
+│   └── web/
+│       ├── index.html      # page layout
+│       ├── style.css       # dark/light themes, responsive layout
+│       ├── app.js          # core: chats, composer, chat streaming, model picker
+│       ├── modes.js        # Decide, Image, Video, Speech, Transcribe, Embed
+│       ├── structured.js   # input fields, output structure, Extract mode
+│       └── pricing.js      # live prices, estimates, usage & limits
+├── app.py                  # `python app.py`: starts the web studio
+├── main.py                 # `python main.py`: the command-line tool
+├── openrouter_client.py    # old import name for openrouter_studio.client
 ├── example.py              # library examples
 ├── tests/                  # offline tests: python -m unittest discover tests
 ├── docs/screenshots/       # images used in this README
@@ -313,8 +323,8 @@ openrouter/
 
 ```mermaid
 flowchart LR
-    B["Browser<br/>web/*"] -- "localhost only" --> S["app.py"]
-    C["main.py / your code"] --> L["openrouter_client.py"]
+    B["Browser<br/>web/*"] -- "localhost only" --> S["server.py"]
+    C["cli.py / your code"] --> L["client.py"]
     S --> L
     L -- "API key from .env" --> O[("OpenRouter API")]
     S --- D[("chats/ · media/")]
@@ -324,10 +334,11 @@ flowchart LR
 
 | What | Where |
 |---|---|
-| API key | `OPENROUTER_API_KEY` in `.env`, or an environment variable (the environment variable wins) |
-| Port / browser | `python app.py --port 9000 --no-browser` |
-| Short names and default model | `MODEL_ALIASES` and `DEFAULT_MODEL` in `openrouter_client.py` |
-| Saved chats / generated files | `chats/` and `media/` (deleting a chat also deletes its files) |
+| Data folder (`.env`, `chats/`, `media/`) | The project folder when you run from it or use `pip install -e .`; `~/.openrouter-studio/` for a regular install. Set `OPENROUTER_STUDIO_HOME` to use another folder. |
+| API key | `OPENROUTER_API_KEY` in the data folder's `.env`, or an environment variable (the environment variable wins) |
+| Port / browser | `python app.py --port 9000 --no-browser` (or `openrouter-studio --port 9000 --no-browser`) |
+| Short names and default model | `MODEL_ALIASES` and `DEFAULT_MODEL` in `openrouter_studio/client.py` |
+| Saved chats / generated files | `chats/` and `media/` in the data folder (deleting a chat also deletes its files) |
 | Theme, recent models, last settings | your browser's local storage |
 
 ## Development
@@ -358,6 +369,7 @@ python -m unittest discover tests   # offline: never calls OpenRouter, uses a te
 | Account balance not shown | OpenRouter shows it only to management keys. See [openrouter.ai/settings/credits](https://openrouter.ai/settings/credits). |
 | Price shows "varies" | Router models (like `openrouter/auto`) charge the price of whichever model they pick. |
 | The page looks old after an update | Restart `python app.py` and hard-refresh the page (`Ctrl` + `Shift` + `R`). |
+| `pip install -e .` says "setup.py not found" | Your pip is too old. Run `python -m pip install --upgrade pip` first. |
 
 > OpenRouter's batch, rerank and some brand-new endpoints aren't in the studio yet. You can still
 > call any of them with `OpenRouterClient` and plain `requests`.

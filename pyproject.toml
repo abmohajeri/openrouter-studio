@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openrouter-studio"
-version = "2.0.0"
+version = "2.1.0"
 description = "A local, AI-Studio-style web UI, CLI, and Python library for OpenRouter models."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,12 +26,13 @@ classifiers = [
 dependencies = ["requests>=2.31"]
 
 [project.scripts]
-openrouter-studio = "app:main"
-openrouter = "main:main"
+openrouter-studio = "openrouter_studio.server:main"
+openrouter = "openrouter_studio.cli:main"
 
 [tool.setuptools]
-py-modules = ["openrouter_client", "app", "main"]
-include-package-data = true
+packages = ["openrouter_studio"]
+py-modules = ["openrouter_client"]  # old import name, kept working
+include-package-data = false
 
 [tool.setuptools.package-data]
-"*" = ["web/*", "web/*.html", "web/*.css", "web/*.js", "docs/screenshots/*", ".env.example"]
+openrouter_studio = ["web/*"]

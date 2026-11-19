@@ -20,8 +20,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import app  # noqa: E402
-import openrouter_client as orc  # noqa: E402
+import openrouter_client  # noqa: E402  (the old import name must keep working)
+from openrouter_studio import client as orc  # noqa: E402
+from openrouter_studio import server as app  # noqa: E402
 
 
 class LibraryTests(unittest.TestCase):
